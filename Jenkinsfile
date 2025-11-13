@@ -23,22 +23,24 @@ pipeline {
     }
 
     stage('Ensure ISO on Proxmox') {
-      steps {
-        dir('packer') {
-          withCredentials([
-            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
-            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET'),
-            string(credentialsId: 'ISO_LOCAL_PATH', variable: 'ISO_LOCAL_PATH_CRED')
-          ]) {
-            powershell '''
-$apiBase = "${env.PROXMOX_API_BASE}"
-$node = "${env.PROXMOX_NODE}"
-$isoStorage = "${env.ISO_STORAGE}"
-$isoFileName = "${env.ISO_FILENAME}"
-$isoRef = "${env.ISO_FILE_REF}"
-$isoSourceUrl = "${env.ISO_SOURCE_URL}"
-$userAgent = "${env.UA}"
+  steps {
+    dir('packer') {
+      withCredentials([
+        string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
+        string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
+      ]) {
+        powershell '''
+# Read env vars directly in PowerShell
+$apiBase      = $env:PROXMOX_API_BASE
+$node         = $env:PROXMOX_NODE
+$isoStorage   = $env:ISO_STORAGE
+$isoFileName  = $env:ISO_FILENAME
+$isoRefEnv    = $env:ISO_FILE_REF
+$isoSourceUrl = $env:ISO_SOURCE_URL
+$userAgent    = $env:UA
+$commonPaths  = $env:COMMON_ISO_PATHS
 
+# Construct token auth header
 if ($env:PM_ID -match '!') {
   $tokenId = $env:PM_ID
 } else {
@@ -47,56 +49,74 @@ if ($env:PM_ID -match '!') {
 $authHeader = "PVEAPIToken=$tokenId=$($env:PM_SECRET)"
 $headers = @{ "Authorization" = $authHeader }
 
-Write-Host "Checking Proxmox for ISO ($isoRef)..."
-$listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
+Write-Host "API base: $apiBase"
+Write-Host "Node: $node"
+Write-Host "ISO storage: $isoStorage"
+Write-Host "ISO file name: $isoFileName"
+Write-Host "ISO file ref (env): $isoRefEnv"
 
-try {
-  $resp = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
-  $items = $resp.data
-  $exists = $items | Where-Object { $_.volid -eq $isoRef -or $_.volid -like "*$isoFileName" }
-} catch {
-  Write-Warning "Could not list Proxmox storage content: $_. Will continue to attempt upload."
-  $exists = $null
+# Try to list storage content in Proxmox (if apiBase is valid)
+$isoExists = $null
+if ([string]::IsNullOrWhiteSpace($apiBase)) {
+  Write-Warning "PROXMOX_API_BASE is empty — will skip content check and attempt upload later."
+} else {
+  $listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
+  try {
+    $resp = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
+    $items = $resp.data
+    $isoExists = $items | Where-Object { $_.volid -eq $isoRefEnv -or $_.volid -like "*$isoFileName" }
+    if ($isoExists) {
+      Write-Host "ISO already present on Proxmox: $($isoExists[0].volid). Skipping upload."
+      # Save volid for later stages
+      $isoExists[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
+      exit 0
+    } else {
+      Write-Host "ISO not found on Proxmox storage (will upload)."
+    }
+  } catch {
+    Write-Warning "Could not list Proxmox storage content: $_. Will continue to attempt upload."
+  }
 }
 
-if ($exists) {
-  Write-Host "ISO already present on Proxmox: $($exists[0].volid). Skipping upload."
-  exit 0
-}
-
+# Build local candidate paths (ISO_LOCAL_PATH is optional)
 $localIsoCandidates = @()
-if ($env:ISO_LOCAL_PATH_CRED -and (Test-Path $env:ISO_LOCAL_PATH_CRED)) {
-  $localIsoCandidates += $env:ISO_LOCAL_PATH_CRED
+if ($env:ISO_LOCAL_PATH -and (Test-Path $env:ISO_LOCAL_PATH)) {
+  $localIsoCandidates += $env:ISO_LOCAL_PATH
 }
 
-$commonList = "${env.COMMON_ISO_PATHS}".Split(';')
-foreach ($p in $commonList) {
-  $p2 = $p -replace '%USERNAME%', $env:USERNAME
-  $candidate = Join-Path $p2 $isoFileName
-  $localIsoCandidates += $candidate
+if (-not [string]::IsNullOrWhiteSpace($commonPaths)) {
+  $parts = $commonPaths -split ';'
+  foreach ($p in $parts) {
+    if ([string]::IsNullOrWhiteSpace($p)) { continue }
+    # replace %USERNAME% placeholder if present
+    $p2 = $p -replace '%USERNAME%', $env:USERNAME
+    if ([string]::IsNullOrWhiteSpace($p2)) { continue }
+    $candidate = Join-Path $p2 $isoFileName
+    $localIsoCandidates += $candidate
+  }
 }
 
+# Find the first existing local ISO candidate
 $localIso = $localIsoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if ($localIso) {
   Write-Host "Found local ISO on Jenkins agent: $localIso"
 } else {
-  Write-Host "No local ISO found. Attempting to download from Microsoft..."
+  # Download to Jenkins cache
   $downloadDir = "C:\\jenkins_cache"
   if (-not (Test-Path $downloadDir)) { New-Item -Path $downloadDir -ItemType Directory -Force | Out-Null }
   $localIso = Join-Path $downloadDir $isoFileName
-
+  Write-Host "No local ISO found. Downloading from $isoSourceUrl to $localIso ..."
   try {
-    Write-Host "Downloading ISO from $isoSourceUrl to $localIso ..."
-    $headersWC = @{ "User-Agent" = $userAgent }
-    Invoke-WebRequest -Uri $isoSourceUrl -OutFile $localIso -Headers $headersWC -UseBasicParsing -ErrorAction Stop
-    Write-Host "Download complete."
+    Invoke-WebRequest -Uri $isoSourceUrl -OutFile $localIso -Headers @{ "User-Agent" = $userAgent } -UseBasicParsing -ErrorAction Stop
+    Write-Host "Download complete: $localIso"
   } catch {
     Write-Error "Download failed: $_"
-    throw "ISO download failed. If Microsoft blocks automated download, place ISO in one of the agent paths listed and rerun."
+    throw "ISO download failed. If Microsoft blocks automated download, place ISO in one of the agent paths and rerun."
   }
 }
 
+# Compute checksum (informational)
 try {
   $sha = Get-FileHash -Path $localIso -Algorithm SHA256
   Write-Host "Local ISO SHA256: $($sha.Hash)"
@@ -104,36 +124,42 @@ try {
   Write-Warning "Could not compute SHA256: $_"
 }
 
+# Upload to Proxmox via API using curl
+if ([string]::IsNullOrWhiteSpace($apiBase)) {
+  Write-Warning "PROXMOX_API_BASE empty — cannot upload via API. Ensure PROXMOX_API_BASE is set or upload ISO manually."
+  throw "PROXMOX_API_BASE empty"
+}
+
 $uploadUri = "$apiBase/nodes/$node/storage/$isoStorage/upload?content=iso"
-Write-Host "Uploading $localIso to Proxmox storage $isoStorage ... (this may take several minutes)"
+Write-Host "Uploading $localIso to Proxmox storage $isoStorage via API..."
 $curl = "C:\\Windows\\System32\\curl.exe"
-if (-Not (Test-Path $curl)) { $curl = "curl" }
+if (-not (Test-Path $curl)) { $curl = "curl" }
 
 $cmd = "$curl --silent --show-error --insecure -X POST -H `"Authorization: $authHeader`" -F `\"content=iso`\" -F `\"filename=@$localIso;type=application/octet-stream`\" `"$uploadUri`""
-Write-Host "Running upload..."
+Write-Host "Running upload command (this may take long)..."
 $uploadOut = Invoke-Expression $cmd
 Write-Host "Upload returned: $uploadOut"
 
 Start-Sleep -Seconds 3
+# verify upload
+$listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
 $resp2 = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
 $items2 = $resp2.data
 $exists2 = $items2 | Where-Object { $_.volid -like "*$isoFileName" }
 if ($exists2) {
   Write-Host "ISO now present on Proxmox: $($exists2[0].volid)"
+  $exists2[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
 } else {
-  Write-Error "Upload completed but ISO not visible in Proxmox storage listing."
+  Write-Error "Upload finished but ISO not found in Proxmox listing."
   throw "Upload verification failed"
 }
 
-$isoVolid = $exists2[0].volid
-Write-Output $isoVolid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
-
 Write-Host "Ensure ISO stage finished successfully."
 '''
-          }
-        }
       }
     }
+  }
+
 
     stage('Prepare Packer (use uploaded ISO)') {
       steps {
@@ -286,5 +312,6 @@ Write-Host "Terraform apply done."
     }
   }
 }
+
 
 

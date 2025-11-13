@@ -139,7 +139,7 @@ Write-Host "Ensure ISO stage finished successfully."
       steps {
         dir('packer') {
           powershell '''
-# This script replaces the existing boot_iso { ... } block in the packer HCL by scanning lines and matching braces.
+# This script replaces the existing boot_iso { ... } block in the packer HCL by scanning lines and counting braces.
 $hclFile = "windows11.pkr.hcl"
 $backup = "$hclFile.bak"
 Copy-Item -Path $hclFile -Destination $backup -Force
@@ -156,7 +156,7 @@ $isoVolid = Get-Content $isoVolidFile -Raw
 
 $startIndex = -1
 for ($i = 0; $i -lt $lines.Length; $i++) {
-    if ($lines[$i] -match '^\s*boot_iso\b') {
+    if ($lines[$i].TrimStart().StartsWith("boot_iso")) {
         $startIndex = $i
         break
     }
@@ -181,7 +181,6 @@ $braceCount = 0
 $endIndex = -1
 for ($j = $startIndex; $j -lt $lines.Length; $j++) {
     $line = $lines[$j]
-    # Count '{' and '}' occurrences in the line
     $open = ($line -split '{').Length - 1
     $close = ($line -split '}').Length - 1
     $braceCount += $open

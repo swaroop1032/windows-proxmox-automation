@@ -220,8 +220,8 @@ Write-Host "Replaced boot_iso block with iso_file: $isoVolid"
       steps {
         dir('packer') {
           withCredentials([
-            string(credentialsId: 'PROXMOX_TOKEN_ID', variable: 'PM_ID'),
-            string(credentialsId: 'PROXMOX_TOKEN_SECRET', variable: 'PM_SECRET'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET'),
             string(credentialsId: 'WIN_ADMIN_PASSWORD', variable: 'WINPASS')
           ]) {
             powershell '''
@@ -286,3 +286,4 @@ Write-Host "Terraform apply done."
     }
   }
 }
+

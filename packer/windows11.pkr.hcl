@@ -41,11 +41,11 @@ source "proxmox-iso" "win11" {
   vm_id   = 9001
 
   boot_iso {
-    # Packer can download iso_url onto the Proxmox server
-    iso_url      = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
-    iso_checksum = ""   # optional: "sha256:<checksum>"
-    unmount      = true
-  }
+  iso_url          = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
+  iso_checksum     = "sha256:D141F6030FED50F75E2B03E1EB2E53646C4B21E5386047CB860AF5223F102A32"
+  iso_storage_pool = "local"    # must be an ISO-capable storage on your Proxmox (see note below)
+  unmount          = true
+}
 
   additional_iso_files {
     cd_files         = ["autounattend.xml"]
@@ -102,3 +102,4 @@ build {
     script = "scripts/04-sysprep.ps1"
   }
 }
+

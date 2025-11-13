@@ -10,12 +10,12 @@ pipeline {
       steps {
         dir('packer') {
           withCredentials([
-            string(credentialsId: 'PM_TOKEN_ID', variable: 'PM_TOKEN_ID'),
-            string(credentialsId: 'PM_TOKEN_SECRET', variable: 'PM_TOKEN_SECRET'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PROXMOX_API_TOKEN_ID'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PROXMOX_API_TOKEN_SECRET'),
             string(credentialsId: 'WIN_ADMIN_PASSWORD', variable: 'WIN_ADMIN_PASSWORD')
           ]) {
             powershell 'packer init .'
-            powershell "packer build -var proxmox_url='https://192.168.31.180:8006/' -var pm_token_id=$PM_TOKEN_ID -var pm_token_secret=$PM_TOKEN_SECRET -var win_admin_pass=$WIN_ADMIN_PASSWORD windows11.pkr.hcl"
+            powershell "packer build -var proxmox_url='https://192.168.31.180:8006/' -var pm_token_id=$PROXMOX_API_TOKEN_ID -var pm_token_secret=$PROXMOX_API_TOKEN_SECRET -var win_admin_pass=$WIN_ADMIN_PASSWORD windows11.pkr.hcl"
           }
         }
       }
@@ -25,14 +25,15 @@ pipeline {
       steps {
         dir('terraform') {
           withCredentials([
-            string(credentialsId: 'PM_TOKEN_ID', variable: 'PM_TOKEN_ID'),
-            string(credentialsId: 'PM_TOKEN_SECRET', variable: 'PM_TOKEN_SECRET')
+            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PROXMOX_API_TOKEN_ID'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PROXMOX_API_TOKEN_SECRET')
           ]) {
             powershell 'terraform init'
-            powershell "terraform apply -auto-approve -var pm_api_token_id=$PM_TOKEN_ID -var pm_api_token_secret=$PM_TOKEN_SECRET"
+            powershell "terraform apply -auto-approve -var pm_api_token_id=$PROXMOX_API_TOKEN_ID -var pm_api_token_secret=$PROXMOX_API_TOKEN_SECRET"
           }
         }
       }
     }
   }
 }
+

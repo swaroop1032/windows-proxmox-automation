@@ -1,4 +1,2 @@
-# Create an unattend.xml for sysprep to generalize $sysprepUnattend = @" <?xml version=\"1.0\"?> <unattend xmlns=\"urn:schemas-microsoft-com:unattend\">  <settings pass=\"specialize\">    <component name=\"Microsoft-Windows-Shell-Setup\" processorArchitecture=\"amd64\">      <ComputerName>WIN11-TEMPLATE</ComputerName>    </component>  </settings>  <settings pass=\"oobeSystem\">    <component name=\"Microsoft-Windows-Shell-Setup\" processorArchitecture=\"amd64\">      <OOBE>        <HideEULAPage>true</HideEULAPage>        <ProtectYourPC>1</ProtectYourPC>      </OOBE>    </component>  </settings> </unattend> "@
-$sysprepPath = "C:\Windows\System32\Sysprep\unattend.xml" Set-Content -Path $sysprepPath -Value $sysprepUnattend -Encoding UTF8
-# Run sysprep generalize and shutdown Start-Process -FilePath C:\Windows\System32\Sysprep\sysprep.exe -ArgumentList "/generalize /oobe /shutdown /unattend:$sysprepPath" -Wait
-Write-Host "Sysprep executed — system will shut down"
+Start-Process "C:\Windows\System32\Sysprep\sysprep.exe" `
+  "/generalize /oobe /shutdown" -Wait

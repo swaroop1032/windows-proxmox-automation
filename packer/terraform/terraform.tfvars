@@ -1,3 +1,4 @@
 proxmox_host      = "your-proxmox-host"
 proxmox_password  = "your-password"
-vm_name           = "build001"
+vm_name           = "win-swa-test"
+

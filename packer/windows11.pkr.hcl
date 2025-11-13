@@ -41,6 +41,7 @@ source "proxmox-iso" "win11" {
   vm_id   = 9001
 
   boot_iso {
+    # Packer can download iso_url onto the Proxmox server
     iso_url      = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
     iso_checksum = ""   # optional: "sha256:<checksum>"
     unmount      = true
@@ -56,10 +57,11 @@ source "proxmox-iso" "win11" {
   cores   = 4
   sockets = 1
 
+  # Correct disk block keys for this plugin version:
   disks {
-    type    = "scsi"
-    storage = "local-lvm"
-    size    = "50G"
+    disk_size    = "50G"
+    storage_pool = "local-lvm"
+    type         = "scsi"
   }
 
   network_adapters {

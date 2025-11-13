@@ -10,7 +10,7 @@ pipeline {
     ISO_FILENAME = "Win11_25H2_EnglishInternational_x64.iso"
     ISO_FILE_REF = "${ISO_STORAGE}:iso/${ISO_FILENAME}"
     COMMON_ISO_PATHS = "C:\\Users\\Public\\Downloads;C:\\Users\\%USERNAME%\\Downloads;C:\\jenkins_cache;D:\\isos"
-    ISO_SOURCE_URL = "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_EnglishInternational_x64.iso"
+    ISO_SOURCE_URL = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   }
 
@@ -49,10 +49,10 @@ if ($env:PM_ID -match '!') {
 $authHeader = "PVEAPIToken=$tokenId=$($env:PM_SECRET)"
 $headers = @{ "Authorization" = $authHeader }
 
-Write-Host "API base: $apiBase"
-Write-Host "Node: $node"
-Write-Host "ISO storage: $isoStorage"
-Write-Host "ISO filename: $isoFileName"
+Write-Host ("API base: {0}" -f $apiBase)
+Write-Host ("Node: {0}" -f $node)
+Write-Host ("ISO storage: {0}" -f $isoStorage)
+Write-Host ("ISO filename: {0}" -f $isoFileName)
 
 # Try to list storage content
 $isoExists = $null
@@ -63,14 +63,14 @@ if (-not [string]::IsNullOrWhiteSpace($apiBase)) {
     $items = $resp.data
     $isoExists = $items | Where-Object { $_.volid -eq $isoRefEnv -or $_.volid -like "*$isoFileName" }
     if ($isoExists) {
-      Write-Host "ISO already present on Proxmox: $($isoExists[0].volid). Skipping upload."
+      Write-Host ("ISO already present on Proxmox: {0}. Skipping upload." -f $isoExists[0].volid)
       $isoExists[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
       exit 0
     } else {
       Write-Host "ISO not found on Proxmox storage (will upload)."
     }
   } catch {
-    Write-Warning "Could not list Proxmox storage content: $_. Will continue to attempt upload."
+    Write-Warning ("Could not list Proxmox storage content: {0}. Will continue to attempt upload." -f $_)
   }
 } else {
   Write-Warning "PROXMOX_API_BASE is empty — cannot check storage; will attempt upload."
@@ -96,26 +96,26 @@ if (-not [string]::IsNullOrWhiteSpace($commonPaths)) {
 $localIso = $localIsoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if ($localIso) {
-  Write-Host "Found local ISO on Jenkins agent: $localIso"
+  Write-Host ("Found local ISO on Jenkins agent: {0}" -f $localIso)
 } else {
   $downloadDir = "C:\\jenkins_cache"
   if (-not (Test-Path $downloadDir)) { New-Item -Path $downloadDir -ItemType Directory -Force | Out-Null }
   $localIso = Join-Path $downloadDir $isoFileName
-  Write-Host "No local ISO found. Attempting to download from $isoSourceUrl ..."
+  Write-Host ("No local ISO found. Attempting to download from {0} to {1} ..." -f $isoSourceUrl, $localIso)
   try {
     Invoke-WebRequest -Uri $isoSourceUrl -OutFile $localIso -Headers @{ "User-Agent" = $userAgent } -UseBasicParsing -ErrorAction Stop
-    Write-Host "Download complete: $localIso"
+    Write-Host ("Download complete: {0}" -f $localIso)
   } catch {
-    Write-Error "Download failed: $_"
+    Write-Error ("Download failed: {0}" -f $_)
     throw "ISO download failed. If Microsoft blocks automated download, place ISO in one of the agent paths and rerun."
   }
 }
 
 try {
   $sha = Get-FileHash -Path $localIso -Algorithm SHA256
-  Write-Host "Local ISO SHA256: $($sha.Hash)"
+  Write-Host ("Local ISO SHA256: {0}" -f $sha.Hash)
 } catch {
-  Write-Warning "Could not compute SHA256: $_"
+  Write-Warning ("Could not compute SHA256: {0}" -f $_)
 }
 
 if ([string]::IsNullOrWhiteSpace($apiBase)) {
@@ -124,7 +124,7 @@ if ([string]::IsNullOrWhiteSpace($apiBase)) {
 }
 
 $uploadUri = "$apiBase/nodes/$node/storage/$isoStorage/upload?content=iso"
-Write-Host "Uploading $localIso to Proxmox storage $isoStorage via API..."
+Write-Host ("Uploading {0} to Proxmox storage {1} via API..." -f $localIso, $isoStorage)
 
 # Build curl arguments and run without creating a single big quoted string (avoids quoting issues)
 $curlPath = "C:\\Windows\\System32\\curl.exe"
@@ -135,13 +135,13 @@ $args = @(
   "--show-error",
   "--insecure",
   "-X", "POST",
-  "-H", "Authorization: $authHeader",
+  "-H", ("Authorization: {0}" -f $authHeader),
   "-F", "content=iso",
-  "-F", "filename=@$localIso;type=application/octet-stream",
+  ("-F", ("filename=@{0};type=application/octet-stream" -f $localIso)),
   $uploadUri
 )
 
-Write-Host "Running curl with arguments: $($args -join ' ')"
+Write-Host ("Running curl with arguments: {0}" -f ($args -join ' '))
 & $curlPath @args
 
 # After upload, verify
@@ -151,7 +151,7 @@ $resp2 = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasic
 $items2 = $resp2.data
 $exists2 = $items2 | Where-Object { $_.volid -like "*$isoFileName" }
 if ($exists2) {
-  Write-Host "ISO now present on Proxmox: $($exists2[0].volid)"
+  Write-Host ("ISO now present on Proxmox: {0}" -f $exists2[0].volid)
   $exists2[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
 } else {
   Write-Error "Upload finished but ISO not found in Proxmox listing."
@@ -200,7 +200,7 @@ if ($startIndex -eq -1) {
     )
     $newContent = $lines + $replacementBlock
     $newContent | Set-Content -Path $hclFile -Encoding UTF8
-    Write-Host "No existing boot_iso found. Appended iso block."
+    Write-Host ("No existing boot_iso found. Appended iso block.")
     exit 0
 }
 
@@ -236,7 +236,7 @@ $replacementBlock = @(
 $newLines = $before + $replacementBlock + $after
 $newLines | Set-Content -Path $hclFile -Encoding UTF8
 
-Write-Host "Replaced boot_iso block with iso_file: $isoVolid"
+Write-Host ("Replaced boot_iso block with iso_file: {0}" -f $isoVolid)
 '''
         }
       }

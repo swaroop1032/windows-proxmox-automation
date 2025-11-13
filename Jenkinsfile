@@ -139,6 +139,7 @@ Write-Host "Ensure ISO stage finished successfully."
       steps {
         dir('packer') {
           powershell '''
+# This script replaces the existing boot_iso { ... } block in the packer HCL by scanning lines and matching braces.
 $hclFile = "windows11.pkr.hcl"
 $backup = "$hclFile.bak"
 Copy-Item -Path $hclFile -Destination $backup -Force
@@ -150,25 +151,67 @@ if (-Not (Test-Path $isoVolidFile)) {
 }
 $isoVolid = Get-Content $isoVolidFile -Raw
 
-$replacement = @"
-boot_iso {
-  iso_file = "$isoVolid"
-  unmount  = true
-}
-"@
+# Read all lines
+[string[]]$lines = Get-Content -Path $hclFile -ErrorAction Stop
 
-$content = Get-Content -Raw -Path $hclFile
-
-$pattern = [regex]::Escape("boot_iso") + "\s*\{[^\}]*\}"
-$newContent = [regex]::Replace($content, $pattern, $replacement, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-
-if ($newContent -eq $content) {
-  $newContent = $content + "`n`n" + $replacement
+$startIndex = -1
+for ($i = 0; $i -lt $lines.Length; $i++) {
+    if ($lines[$i] -match '^\s*boot_iso\b') {
+        $startIndex = $i
+        break
+    }
 }
 
-Set-Content -Path $hclFile -Value $newContent -Encoding UTF8
+if ($startIndex -eq -1) {
+    # No boot_iso block — append the new block
+    $replacementBlock = @(
+        "boot_iso {",
+        "  iso_file = ""$isoVolid""",
+        "  unmount  = true",
+        "}"
+    )
+    $newContent = $lines + $replacementBlock
+    $newContent | Set-Content -Path $hclFile -Encoding UTF8
+    Write-Host "No existing boot_iso found. Appended iso block."
+    exit 0
+}
 
-Write-Host "Packer HCL prepared to use iso_file: $isoVolid"
+# Find matching closing brace by counting braces
+$braceCount = 0
+$endIndex = -1
+for ($j = $startIndex; $j -lt $lines.Length; $j++) {
+    $line = $lines[$j]
+    # Count '{' and '}' occurrences in the line
+    $open = ($line -split '{').Length - 1
+    $close = ($line -split '}').Length - 1
+    $braceCount += $open
+    $braceCount -= $close
+    if ($braceCount -eq 0 -and $j -gt $startIndex) {
+        $endIndex = $j
+        break
+    }
+}
+
+if ($endIndex -eq -1) {
+    Write-Error "Could not find end of boot_iso block. Aborting to avoid corrupting file."
+    exit 1
+}
+
+# Build new content: lines before startIndex + replacement block + lines after endIndex
+$before = if ($startIndex -gt 0) { $lines[0..($startIndex - 1)] } else { @() }
+$after = if ($endIndex -lt $lines.Length - 1) { $lines[($endIndex + 1)..($lines.Length - 1)] } else { @() }
+
+$replacementBlock = @(
+    "boot_iso {",
+    "  iso_file = ""$isoVolid""",
+    "  unmount  = true",
+    "}"
+)
+
+$newLines = $before + $replacementBlock + $after
+$newLines | Set-Content -Path $hclFile -Encoding UTF8
+
+Write-Host "Replaced boot_iso block with iso_file: $isoVolid"
 '''
         }
       }

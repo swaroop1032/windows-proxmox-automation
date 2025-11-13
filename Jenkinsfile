@@ -26,8 +26,8 @@ pipeline {
       steps {
         dir('packer') {
           withCredentials([
-            string(credentialsId: 'PROXMOX_TOKEN_ID', variable: 'PM_ID'),
-            string(credentialsId: 'PROXMOX_TOKEN_SECRET', variable: 'PM_SECRET'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET'),
             string(credentialsId: 'ISO_LOCAL_PATH', variable: 'ISO_LOCAL_PATH_CRED')
           ]) {
             powershell '''
@@ -250,8 +250,8 @@ Write-Host "Packer build completed."
       steps {
         dir('terraform') {
           withCredentials([
-            string(credentialsId: 'PROXMOX_TOKEN_ID', variable: 'PM_ID'),
-            string(credentialsId: 'PROXMOX_TOKEN_SECRET', variable: 'PM_SECRET')
+            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
           ]) {
             powershell '''
 if ($env:PM_ID -match '!') {
@@ -286,4 +286,5 @@ Write-Host "Terraform apply done."
     }
   }
 }
+
 

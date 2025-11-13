@@ -23,14 +23,14 @@ pipeline {
     }
 
     stage('Ensure ISO on Proxmox') {
-  steps {
-    dir('packer') {
-      withCredentials([
-        string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
-        string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
-      ]) {
-        powershell '''
-# Read env vars directly in PowerShell
+      steps {
+        dir('packer') {
+          withCredentials([
+            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
+            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
+          ]) {
+            powershell '''
+# Read environment variables inside PowerShell
 $apiBase      = $env:PROXMOX_API_BASE
 $node         = $env:PROXMOX_NODE
 $isoStorage   = $env:ISO_STORAGE
@@ -40,7 +40,7 @@ $isoSourceUrl = $env:ISO_SOURCE_URL
 $userAgent    = $env:UA
 $commonPaths  = $env:COMMON_ISO_PATHS
 
-# Construct token auth header
+# Build auth header
 if ($env:PM_ID -match '!') {
   $tokenId = $env:PM_ID
 } else {
@@ -52,14 +52,11 @@ $headers = @{ "Authorization" = $authHeader }
 Write-Host "API base: $apiBase"
 Write-Host "Node: $node"
 Write-Host "ISO storage: $isoStorage"
-Write-Host "ISO file name: $isoFileName"
-Write-Host "ISO file ref (env): $isoRefEnv"
+Write-Host "ISO filename: $isoFileName"
 
-# Try to list storage content in Proxmox (if apiBase is valid)
+# Try to list storage content
 $isoExists = $null
-if ([string]::IsNullOrWhiteSpace($apiBase)) {
-  Write-Warning "PROXMOX_API_BASE is empty — will skip content check and attempt upload later."
-} else {
+if (-not [string]::IsNullOrWhiteSpace($apiBase)) {
   $listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
   try {
     $resp = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
@@ -67,7 +64,6 @@ if ([string]::IsNullOrWhiteSpace($apiBase)) {
     $isoExists = $items | Where-Object { $_.volid -eq $isoRefEnv -or $_.volid -like "*$isoFileName" }
     if ($isoExists) {
       Write-Host "ISO already present on Proxmox: $($isoExists[0].volid). Skipping upload."
-      # Save volid for later stages
       $isoExists[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
       exit 0
     } else {
@@ -76,9 +72,11 @@ if ([string]::IsNullOrWhiteSpace($apiBase)) {
   } catch {
     Write-Warning "Could not list Proxmox storage content: $_. Will continue to attempt upload."
   }
+} else {
+  Write-Warning "PROXMOX_API_BASE is empty — cannot check storage; will attempt upload."
 }
 
-# Build local candidate paths (ISO_LOCAL_PATH is optional)
+# Prepare local ISO candidate list
 $localIsoCandidates = @()
 if ($env:ISO_LOCAL_PATH -and (Test-Path $env:ISO_LOCAL_PATH)) {
   $localIsoCandidates += $env:ISO_LOCAL_PATH
@@ -88,7 +86,6 @@ if (-not [string]::IsNullOrWhiteSpace($commonPaths)) {
   $parts = $commonPaths -split ';'
   foreach ($p in $parts) {
     if ([string]::IsNullOrWhiteSpace($p)) { continue }
-    # replace %USERNAME% placeholder if present
     $p2 = $p -replace '%USERNAME%', $env:USERNAME
     if ([string]::IsNullOrWhiteSpace($p2)) { continue }
     $candidate = Join-Path $p2 $isoFileName
@@ -96,17 +93,15 @@ if (-not [string]::IsNullOrWhiteSpace($commonPaths)) {
   }
 }
 
-# Find the first existing local ISO candidate
 $localIso = $localIsoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if ($localIso) {
   Write-Host "Found local ISO on Jenkins agent: $localIso"
 } else {
-  # Download to Jenkins cache
   $downloadDir = "C:\\jenkins_cache"
   if (-not (Test-Path $downloadDir)) { New-Item -Path $downloadDir -ItemType Directory -Force | Out-Null }
   $localIso = Join-Path $downloadDir $isoFileName
-  Write-Host "No local ISO found. Downloading from $isoSourceUrl to $localIso ..."
+  Write-Host "No local ISO found. Attempting to download from $isoSourceUrl ..."
   try {
     Invoke-WebRequest -Uri $isoSourceUrl -OutFile $localIso -Headers @{ "User-Agent" = $userAgent } -UseBasicParsing -ErrorAction Stop
     Write-Host "Download complete: $localIso"
@@ -116,7 +111,6 @@ if ($localIso) {
   }
 }
 
-# Compute checksum (informational)
 try {
   $sha = Get-FileHash -Path $localIso -Algorithm SHA256
   Write-Host "Local ISO SHA256: $($sha.Hash)"
@@ -124,10 +118,9 @@ try {
   Write-Warning "Could not compute SHA256: $_"
 }
 
-# Upload to Proxmox via API using curl
 if ([string]::IsNullOrWhiteSpace($apiBase)) {
-  Write-Warning "PROXMOX_API_BASE empty — cannot upload via API. Ensure PROXMOX_API_BASE is set or upload ISO manually."
-  throw "PROXMOX_API_BASE empty"
+  Write-Error "PROXMOX_API_BASE is not set. Cannot upload ISO. Aborting."
+  throw "PROXMOX_API_BASE missing"
 }
 
 $uploadUri = "$apiBase/nodes/$node/storage/$isoStorage/upload?content=iso"
@@ -136,7 +129,7 @@ $curl = "C:\\Windows\\System32\\curl.exe"
 if (-not (Test-Path $curl)) { $curl = "curl" }
 
 $cmd = "$curl --silent --show-error --insecure -X POST -H `"Authorization: $authHeader`" -F `\"content=iso`\" -F `\"filename=@$localIso;type=application/octet-stream`\" `"$uploadUri`""
-Write-Host "Running upload command (this may take long)..."
+Write-Host "Running upload (this may take some time)..."
 $uploadOut = Invoke-Expression $cmd
 Write-Host "Upload returned: $uploadOut"
 
@@ -156,16 +149,15 @@ if ($exists2) {
 
 Write-Host "Ensure ISO stage finished successfully."
 '''
+          }
+        }
       }
     }
-  }
-
 
     stage('Prepare Packer (use uploaded ISO)') {
       steps {
         dir('packer') {
           powershell '''
-# This script replaces the existing boot_iso { ... } block in the packer HCL by scanning lines and counting braces.
 $hclFile = "windows11.pkr.hcl"
 $backup = "$hclFile.bak"
 Copy-Item -Path $hclFile -Destination $backup -Force
@@ -189,7 +181,6 @@ for ($i = 0; $i -lt $lines.Length; $i++) {
 }
 
 if ($startIndex -eq -1) {
-    # No boot_iso block — append the new block
     $replacementBlock = @(
         "boot_iso {",
         "  iso_file = ""$isoVolid""",
@@ -202,7 +193,6 @@ if ($startIndex -eq -1) {
     exit 0
 }
 
-# Find matching closing brace by counting braces
 $braceCount = 0
 $endIndex = -1
 for ($j = $startIndex; $j -lt $lines.Length; $j++) {
@@ -222,7 +212,6 @@ if ($endIndex -eq -1) {
     exit 1
 }
 
-# Build new content: lines before startIndex + replacement block + lines after endIndex
 $before = if ($startIndex -gt 0) { $lines[0..($startIndex - 1)] } else { @() }
 $after = if ($endIndex -lt $lines.Length - 1) { $lines[($endIndex + 1)..($lines.Length - 1)] } else { @() }
 
@@ -260,11 +249,11 @@ if ($env:PM_ID -match '!') {
 }
 
 packer init .
-
 if ($LASTEXITCODE -ne 0) { Write-Error "packer init failed"; exit $LASTEXITCODE }
 
 packer build -var "proxmox_username=$proxmox_username" -var "proxmox_token=$env:PM_SECRET" -var "winrm_password=$env:WINPASS" windows11.pkr.hcl
 if ($LASTEXITCODE -ne 0) { Write-Error "packer build failed"; exit $LASTEXITCODE }
+
 Write-Host "Packer build completed."
 '''
           }
@@ -298,7 +287,7 @@ Write-Host "Terraform apply done."
         }
       }
     }
-  }
+  } // end stages
 
   post {
     always {
@@ -311,7 +300,4 @@ Write-Host "Terraform apply done."
       echo "Pipeline succeeded — template created and VM provisioned."
     }
   }
-}
-
-
-
+} // end pipeline

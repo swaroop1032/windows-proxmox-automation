@@ -10,7 +10,7 @@ pipeline {
     ISO_FILENAME = "Win11_25H2_EnglishInternational_x64.iso"
     ISO_FILE_REF = "${ISO_STORAGE}:iso/${ISO_FILENAME}"
     COMMON_ISO_PATHS = "C:\\Users\\Public\\Downloads;C:\\Users\\%USERNAME%\\Downloads;C:\\jenkins_cache;D:\\isos"
-    ISO_SOURCE_URL = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
+    ISO_SOURCE_URL = "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_EnglishInternational_x64.iso"
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   }
 
@@ -29,137 +29,8 @@ pipeline {
             string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
             string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
           ]) {
-            powershell '''
-# Read environment variables inside PowerShell
-$apiBase      = $env:PROXMOX_API_BASE
-$node         = $env:PROXMOX_NODE
-$isoStorage   = $env:ISO_STORAGE
-$isoFileName  = $env:ISO_FILENAME
-$isoRefEnv    = $env:ISO_FILE_REF
-$isoSourceUrl = $env:ISO_SOURCE_URL
-$userAgent    = $env:UA
-$commonPaths  = $env:COMMON_ISO_PATHS
-
-# Build auth header using the Jenkins-provided credential variables (PM_ID, PM_SECRET)
-if ($env:PM_ID -match '!') {
-  $tokenId = $env:PM_ID
-} else {
-  $tokenId = "terraform@pam!$($env:PM_ID)"
-}
-$authHeader = "PVEAPIToken=$tokenId=$($env:PM_SECRET)"
-$headers = @{ "Authorization" = $authHeader }
-
-Write-Host ("API base: {0}" -f $apiBase)
-Write-Host ("Node: {0}" -f $node)
-Write-Host ("ISO storage: {0}" -f $isoStorage)
-Write-Host ("ISO filename: {0}" -f $isoFileName)
-
-# Try to list storage content
-$isoExists = $null
-if (-not [string]::IsNullOrWhiteSpace($apiBase)) {
-  $listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
-  try {
-    $resp = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
-    $items = $resp.data
-    $isoExists = $items | Where-Object { $_.volid -eq $isoRefEnv -or $_.volid -like "*$isoFileName" }
-    if ($isoExists) {
-      Write-Host ("ISO already present on Proxmox: {0}. Skipping upload." -f $isoExists[0].volid)
-      $isoExists[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
-      exit 0
-    } else {
-      Write-Host "ISO not found on Proxmox storage (will upload)."
-    }
-  } catch {
-    Write-Warning ("Could not list Proxmox storage content: {0}. Will continue to attempt upload." -f $_)
-  }
-} else {
-  Write-Warning "PROXMOX_API_BASE is empty — cannot check storage; will attempt upload."
-}
-
-# Prepare local ISO candidate list
-$localIsoCandidates = @()
-if ($env:ISO_LOCAL_PATH -and (Test-Path $env:ISO_LOCAL_PATH)) {
-  $localIsoCandidates += $env:ISO_LOCAL_PATH
-}
-
-if (-not [string]::IsNullOrWhiteSpace($commonPaths)) {
-  $parts = $commonPaths -split ';'
-  foreach ($p in $parts) {
-    if ([string]::IsNullOrWhiteSpace($p)) { continue }
-    $p2 = $p -replace '%USERNAME%', $env:USERNAME
-    if ([string]::IsNullOrWhiteSpace($p2)) { continue }
-    $candidate = Join-Path $p2 $isoFileName
-    $localIsoCandidates += $candidate
-  }
-}
-
-$localIso = $localIsoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-if ($localIso) {
-  Write-Host ("Found local ISO on Jenkins agent: {0}" -f $localIso)
-} else {
-  $downloadDir = "C:\\jenkins_cache"
-  if (-not (Test-Path $downloadDir)) { New-Item -Path $downloadDir -ItemType Directory -Force | Out-Null }
-  $localIso = Join-Path $downloadDir $isoFileName
-  Write-Host ("No local ISO found. Attempting to download from {0} to {1} ..." -f $isoSourceUrl, $localIso)
-  try {
-    Invoke-WebRequest -Uri $isoSourceUrl -OutFile $localIso -Headers @{ "User-Agent" = $userAgent } -UseBasicParsing -ErrorAction Stop
-    Write-Host ("Download complete: {0}" -f $localIso)
-  } catch {
-    Write-Error ("Download failed: {0}" -f $_)
-    throw "ISO download failed. If Microsoft blocks automated download, place ISO in one of the agent paths and rerun."
-  }
-}
-
-try {
-  $sha = Get-FileHash -Path $localIso -Algorithm SHA256
-  Write-Host ("Local ISO SHA256: {0}" -f $sha.Hash)
-} catch {
-  Write-Warning ("Could not compute SHA256: {0}" -f $_)
-}
-
-if ([string]::IsNullOrWhiteSpace($apiBase)) {
-  Write-Error "PROXMOX_API_BASE is not set. Cannot upload ISO. Aborting."
-  throw "PROXMOX_API_BASE missing"
-}
-
-$uploadUri = "$apiBase/nodes/$node/storage/$isoStorage/upload?content=iso"
-Write-Host ("Uploading {0} to Proxmox storage {1} via API..." -f $localIso, $isoStorage)
-
-# Build curl arguments and run without creating a single big quoted string (avoids quoting issues)
-$curlPath = "C:\\Windows\\System32\\curl.exe"
-if (-not (Test-Path $curlPath)) { $curlPath = "curl" }
-
-$args = @(
-  "--silent",
-  "--show-error",
-  "--insecure",
-  "-X", "POST",
-  "-H", ("Authorization: {0}" -f $authHeader),
-  "-F", "content=iso",
-  ("-F", ("filename=@{0};type=application/octet-stream" -f $localIso)),
-  $uploadUri
-)
-
-Write-Host ("Running curl with arguments: {0}" -f ($args -join ' '))
-& $curlPath @args
-
-# After upload, verify
-Start-Sleep -Seconds 3
-$listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
-$resp2 = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
-$items2 = $resp2.data
-$exists2 = $items2 | Where-Object { $_.volid -like "*$isoFileName" }
-if ($exists2) {
-  Write-Host ("ISO now present on Proxmox: {0}" -f $exists2[0].volid)
-  $exists2[0].volid | Out-File -FilePath "..\\iso_volid.txt" -Encoding ascii
-} else {
-  Write-Error "Upload finished but ISO not found in Proxmox listing."
-  throw "Upload verification failed"
-}
-
-Write-Host "Ensure ISO stage finished successfully."
-'''
+            // Run the external PowerShell script stored at packer/scripts/ensure_iso.ps1
+            powershell script: readFile('packer/scripts/ensure_iso.ps1'), returnStatus: false
           }
         }
       }
@@ -298,6 +169,7 @@ Write-Host "Terraform apply done."
         }
       }
     }
+
   } // end stages
 
   post {
@@ -311,4 +183,4 @@ Write-Host "Terraform apply done."
       echo "Pipeline succeeded — template created and VM provisioned."
     }
   }
-} // end pipeline
+}

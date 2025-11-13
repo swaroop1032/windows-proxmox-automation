@@ -41,7 +41,7 @@ source "proxmox-iso" "win11" {
   vm_id   = 9001
 
   boot_iso {
-  iso_url          = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
+  iso_url          = "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_EnglishInternational_x64.iso?t=6fa30090-8b9a-4486-83da-2b49f18a3a3b&P1=1763100824&P2=601&P3=2&P4=dY2LfaZwusfdzYi27g%2f9dnRxC3OwcNq8ieKLYMQA7pDv2B8RZ4LQHPz0SSglOB1g234LR9REGnhVvgSz5CCTbc6nMeIS5SaAGOq0QKXVcrcZPeoOOXB3FOvsPJ9PrZ5cxlEdvuQjwCOrO1goqEGCiWIitmYSltJypb3JFRe0n1RJ1JT47HFn7qiax0JIzYe9mPs4kfXPkIqN4GrpKbdgh1NHSg9eh4GDxLSrB%2bWZpSgUjpBvgWMKnB8OqvOPXwnTieiDiwWXwVrKFv%2fMbHuI6LLLvrmJ1lb4RS%2bzfBqd7LPTC9cbyle7sxu9KkMmQzq3TPa3eAhARcvt%2bqJLXGB2rg%3d%3d"
   iso_checksum     = "sha256:D141F6030FED50F75E2B03E1EB2E53646C4B21E5386047CB860AF5223F102A32"
   iso_storage_pool = "local"    # must be an ISO-capable storage on your Proxmox (see note below)
   unmount          = true
@@ -102,5 +102,6 @@ build {
     script = "scripts/sysprep.ps1"
   }
 }
+
 
 

@@ -87,19 +87,20 @@ build {
   sources = ["source.proxmox-iso.win11"]
 
   provisioner "powershell" {
-    script = "scripts/01-enable-winrm.ps1"
+    script = "scripts/enable-winrm.ps1"
   }
 
   provisioner "powershell" {
-    script = "scripts/02-install-virtio.ps1"
+    script = "scripts/install-virtio.ps1"
   }
 
   provisioner "powershell" {
-    script = "scripts/03-optimize.ps1"
+    script = "scripts/optimize.ps1"
   }
 
   provisioner "powershell" {
-    script = "scripts/04-sysprep.ps1"
+    script = "scripts/sysprep.ps1"
   }
 }
+
 

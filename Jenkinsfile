@@ -10,7 +10,7 @@ pipeline {
     ISO_FILENAME = "Win11_25H2_EnglishInternational_x64.iso"
     ISO_FILE_REF = "${ISO_STORAGE}:iso/${ISO_FILENAME}"
     COMMON_ISO_PATHS = "C:\\Users\\Public\\Downloads;C:\\Users\\%USERNAME%\\Downloads;C:\\jenkins_cache;D:\\isos"
-    ISO_SOURCE_URL = "https://software.download.prss.microsoft.com/dbazure/Win11_23H2_English_x64.iso"
+    ISO_SOURCE_URL = "https://software.download.prss.microsoft.com/dbazure/Win11_25H2_EnglishInternational_x64.iso"
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   }
 
@@ -40,7 +40,7 @@ $isoSourceUrl = $env:ISO_SOURCE_URL
 $userAgent    = $env:UA
 $commonPaths  = $env:COMMON_ISO_PATHS
 
-# Build auth header
+# Build auth header using the Jenkins-provided credential variables (PM_ID, PM_SECRET)
 if ($env:PM_ID -match '!') {
   $tokenId = $env:PM_ID
 } else {
@@ -125,16 +125,27 @@ if ([string]::IsNullOrWhiteSpace($apiBase)) {
 
 $uploadUri = "$apiBase/nodes/$node/storage/$isoStorage/upload?content=iso"
 Write-Host "Uploading $localIso to Proxmox storage $isoStorage via API..."
-$curl = "C:\\Windows\\System32\\curl.exe"
-if (-not (Test-Path $curl)) { $curl = "curl" }
 
-$cmd = "$curl --silent --show-error --insecure -X POST -H `"Authorization: $authHeader`" -F `\"content=iso`\" -F `\"filename=@$localIso;type=application/octet-stream`\" `"$uploadUri`""
-Write-Host "Running upload (this may take some time)..."
-$uploadOut = Invoke-Expression $cmd
-Write-Host "Upload returned: $uploadOut"
+# Build curl arguments and run without creating a single big quoted string (avoids quoting issues)
+$curlPath = "C:\\Windows\\System32\\curl.exe"
+if (-not (Test-Path $curlPath)) { $curlPath = "curl" }
 
+$args = @(
+  "--silent",
+  "--show-error",
+  "--insecure",
+  "-X", "POST",
+  "-H", "Authorization: $authHeader",
+  "-F", "content=iso",
+  "-F", "filename=@$localIso;type=application/octet-stream",
+  $uploadUri
+)
+
+Write-Host "Running curl with arguments: $($args -join ' ')"
+& $curlPath @args
+
+# After upload, verify
 Start-Sleep -Seconds 3
-# verify upload
 $listUri = "$apiBase/nodes/$node/storage/$isoStorage/content?content=iso"
 $resp2 = Invoke-RestMethod -Method Get -Uri $listUri -Headers $headers -UseBasicParsing -ErrorAction Stop
 $items2 = $resp2.data

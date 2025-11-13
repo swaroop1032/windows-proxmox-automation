@@ -23,18 +23,19 @@ pipeline {
     }
 
     stage('Ensure ISO on Proxmox') {
-      steps {
-        dir('packer') {
-          withCredentials([
-            string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
-            string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
-          ]) {
-            // Run the external PowerShell script stored at packer/scripts/ensure_iso.ps1
-            powershell script: readFile('packer/scripts/ensure_iso.ps1'), returnStatus: false
-          }
-        }
+  steps {
+    dir('packer') {
+      withCredentials([
+        string(credentialsId: 'PROXMOX_API_TOKEN_ID', variable: 'PM_ID'),
+        string(credentialsId: 'PROXMOX_API_TOKEN_SECRET', variable: 'PM_SECRET')
+      ]) {
+        // read the script relative to the current dir('packer')
+        powershell script: readFile('scripts/ensure_iso.ps1'), returnStatus: false
       }
     }
+  }
+}
+
 
     stage('Prepare Packer (use uploaded ISO)') {
       steps {
@@ -184,3 +185,4 @@ Write-Host "Terraform apply done."
     }
   }
 }
+
